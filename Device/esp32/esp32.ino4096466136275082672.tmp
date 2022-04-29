@@ -1,0 +1,243 @@
+HardwareSerial swSer(2);
+#include <ArduinoJson.h>
+#include "RSAAuth.h"
+#include "DHT.h"
+#define DHTTYPE DHT11 // DHT 11
+#define DHTPin 0 // GPIO 0
+
+DHT dht(DHTPin, DHTTYPE);     // Initialize DHT sensor.
+#define BAUD_RATE 9600
+static unsigned long t_demo = 0;
+                     /* current counting time for LCD Display */
+unsigned long max_demo = 5*1000;
+
+float tempCompareMax = 35;
+float tempCompareMin = 30;
+float humidCompareMax = 60;
+float humidCompareMin = 50;
+DynamicJsonDocument doc(1024);
+float temp = 1;
+float humid = 1;      
+char cstr[255];
+#define output1 14 // Động cơ như quạt máy phun sương
+#define output2 13
+#define output3 12
+#define output4 16  
+byte en[255];
+byte pac[255];
+bool state1 = false;
+bool state2 = false;
+bool state3 = false;
+bool state4 = false;
+
+void guiDHT () {
+  for(int i=0;i<100;i++)
+  cstr[i]=0;
+  sprintf(cstr,"{\"idgw\":1,\"t\":%.2f,\"h\":%.2f,\"iddv\":1,\"st1\":\"%s\",\"st2\":\"%s\",\"st3\":\"%s\",\"st4\":\"%s\"}", 
+                                      temp,humid, state1 ? "OFF":"ON", state2 ? "OFF":"ON", state3 ? "OFF":"ON", state4 ? "OFF":"ON");
+  rsa.Send(cstr,swSer);
+}
+
+void guiStateRelay (int idrl) {
+   readStateRelay();
+   for(int i=0;i<100;i++)
+   cstr[i]=0;
+   sprintf(cstr,"{\"idgw\":1,\"t\":%.2f,\"h\":%.2f,\"iddv\":1,\"st1\":\"%s\",\"st2\":\"%s\",\"st3\":\"%s\",\"st4\":\"%s\",\"idrl\":%d,\"r\":1}", 
+                                      temp,humid, state1 ? "OFF":"ON", state2 ? "OFF":"ON", state3 ? "OFF":"ON", state4 ? "OFF":"ON", idrl);
+   rsaSend();
+}
+
+void guiStateWarning (int idrl) {
+   readStateRelay();
+   for(int i=0;i<100;i++)
+   cstr[i]=0;
+   sprintf(cstr,"{\"idgw\":1,\"t\":%.2f,\"h\":%.2f,\"iddv\":1,\"st1\":\"%s\",\"st2\":\"%s\",\"st3\":\"%s\",\"st4\":\"%s\",\"idrl\":%d,\"w\":1}", 
+                                      temp,humid, state1 ? "OFF":"ON", state2 ? "OFF":"ON", state3 ? "OFF":"ON", state4 ? "OFF":"ON", idrl);
+   rsaSend();
+}
+
+void rsaSend(){
+  Serial.println("-Gui:");
+  Serial.println((char*)cstr);
+  yield();
+  rsa.Send(cstr,swSer);
+}
+
+void readStateRelay(){
+    state1 = digitalRead(output1);
+    state2 = digitalRead(output2);
+    state3 = digitalRead(output3);
+    state4 = digitalRead(output4);
+}
+
+void demo_TIMER(void){
+  if ((unsigned long) millis() - t_demo >= max_demo) {
+    readDHT();
+    t_demo = millis();
+    guiDHT();
+  }
+}
+
+void request(String payload) {
+  deserializeJson(doc, payload);
+  JsonObject obj = doc.as<JsonObject>();
+  int IDRL = obj["idrl"];  
+  int ID = obj["iddv"];
+  int IDGW = obj["idgw"];
+  String con = obj["state"].as<String>();
+  
+  if(IDGW == 1 && ID ==1)
+  {
+   switch(IDRL){
+   case 14:{
+    if(con=="on"){
+      digitalWrite(output1,0);
+      delay(100);
+    }
+    else{
+      digitalWrite(output1,1);
+      delay(100);  
+    }
+    break;
+   }
+   case 13:{
+    if(con=="on"){
+      digitalWrite(output2,0);
+      delay(100);
+    }
+    else{
+      digitalWrite(output2,1);
+      delay(100);   
+    }
+    break;
+   }
+   case 12:{
+    if(con=="on"){
+      digitalWrite(output3,0);
+      delay(100);
+    }
+    else{
+      digitalWrite(output3,1);
+      delay(100);
+    }
+    break;
+   }
+   case 16:{
+   if(con=="on"){
+      digitalWrite(output4,0);
+      delay(100);
+    }
+    else{
+      digitalWrite(output4,1);
+      delay(100);
+    }
+    break;
+   }
+   }
+  guiStateRelay(IDRL);
+  }
+}
+void setup() {
+
+  Serial.begin (BAUD_RATE); 
+  dht.begin();
+  //----------
+  swSer.begin(BAUD_RATE);
+  
+
+  pinMode(output1, OUTPUT);
+  pinMode(output2, OUTPUT);
+  pinMode(output3, OUTPUT);
+  pinMode(output4, OUTPUT);
+  
+  digitalWrite(output1,1);
+  digitalWrite(output2,1);
+  digitalWrite(output3,1);
+  digitalWrite(output4,1);
+  readStateRelay();
+  Serial.println("\nRSA serial test started");
+}
+byte buff[255];
+int BEGIN=0;
+int END=0;
+int DesLen=0;
+//byte unpac[255];
+unsigned long startMillisTemp = 0;
+unsigned long startMillisHumid = 0;
+unsigned long warningTime = 10000;  
+
+int a = 1;
+byte m[255];
+void loop() {
+  DesLen=0;
+  if(rsa.Receive(buff,&BEGIN,&END,m,&DesLen, swSer))
+  {
+    if(DesLen>0)
+    {
+      Serial.println("-Nhan tu getway:");
+      Serial.println((char*)m);
+      request((char*)m);  
+    }
+  }
+  else Serial.println("Nhan error:");
+  demo_TIMER();
+  if (state1) {
+    startMillisTemp = millis();
+    
+  } 
+  else{ 
+    if((unsigned long)millis() - startMillisTemp >= warningTime){ // Nếu trạng thái của relay1 luôn bật trong khoảng thời gian 10s
+                                                                  // mà nhiệt độ vẫn trên mức báo động thì bật led đỏ thông báo đến người dùng 
+          if((unsigned long)millis() - startMillisTemp >= 1000){
+              
+              guiStateWarning(output3); 
+          }
+      }
+  }
+  if(state2) {
+    startMillisHumid = millis();
+   
+  }
+  else{
+    if((unsigned long)millis() - startMillisHumid >= warningTime){// Nếu trạng thái của relay2 luôn bật trong khoảng thời gian 10s
+                                                                 // mà nhiệt độ vẫn trên mức báo động thì bật led xanh thông báo đến người dùng 
+         if((unsigned long)millis() - startMillisTemp >= 1000){
+            
+            guiStateWarning(output4);
+        }
+    } 
+  }
+}
+void readDHT(){
+  float h = dht.readHumidity();
+  float t = dht.readTemperature(); 
+  
+  if (isnan(h) || isnan(t)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+  humid = h;
+  temp = t;
+
+  // Nếu nhiệt độ lớn hơn 35 thì 
+  if(temp > tempCompareMax){ 
+    digitalWrite(output1, 0);
+    guiStateRelay(output1);
+    
+  }
+  else{
+    digitalWrite(output3, 1);
+    guiStateRelay(output3);
+    
+  }
+  if (humid > humidCompareMax){
+    digitalWrite(output4, 0);
+    guiStateRelay(output4);
+  
+  }
+  else{
+    digitalWrite(output4, 1);
+    guiStateRelay(output4);
+    return;
+  }
+}

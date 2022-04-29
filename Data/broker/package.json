@@ -1,0 +1,15 @@
+{
+  "scripts": {
+    "start": "node serverMQTT.js"
+  },
+  "dependencies": {
+    "aedes": "^0.46.1",
+    "axios": "^0.26.1",
+    "dotenv": "^16.0.0",
+    "netlify-lambda": "^2.0.15",
+    "websocket-stream": "^5.5.2"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.15"
+  }
+}
